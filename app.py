@@ -12,42 +12,64 @@ scaler = joblib.load('scaler.joblib')
 
 print("Model and scaler loaded successfully.")
 
+from typing import Dict, List
+import numpy as np
+from flask import request, jsonify
+import logging
 
-@app.route('/predict', methods=['POST'])
-def predict():
-    data = request.get_json(force=True)
-    print("Received data for prediction:", data)
+# Extract feature order to a constant for better maintainability
+FEATURE_ORDER = ['Pregnancies', 'Glucose', 'BloodPressure', 'SkinThickness', 'Insulin', 'BMI', 'DiabetesPedigreeFunction', 'Age']
 
-    # Convert the incoming JSON data to a list of values
-    # Assuming 'data' is a dictionary with feature names as keys
-    # The order of features should match the training data
-    # For simplicity, we'll assume a fixed order based on the original DataFrame columns, excluding 'Outcome'
-    feature_order = ['Pregnancies', 'Glucose', 'BloodPressure', 'SkinThickness', 'Insulin', 'BMI', 'DiabetesPedigreeFunction', 'Age']
-    
+# Define a function to extract input features from the request data
+def extract_input_features(data: Dict) -> List:
     try:
-        input_features = [data[feature] for feature in feature_order]
+        # Use a list comprehension to extract features in the correct order
+        return [data[feature] for feature in FEATURE_ORDER]
     except KeyError as e:
-        return jsonify({"error": f"Missing feature in input data: {e}. Expected features: {feature_order}"}), 400
+        # Raise a custom error with a descriptive message
+        raise ValueError(f"Missing feature in input data: {e}. Expected features: {FEATURE_ORDER}")
 
+# Define a function to preprocess the input features
+def preprocess_input_features(input_features: List) -> np.ndarray:
     # Convert the list to a NumPy array
     input_array = np.array(input_features)
-
-    # Reshape the input data to a 2D array, as scaler.transform expects 2D input
+    # Reshape the input data to a 2D array
     input_array_reshaped = input_array.reshape(1, -1)
+    # Use the loaded scaler object to transform the input features
+    return scaler.transform(input_array_reshaped)
 
-    # Use the loaded scaler object to transform (preprocess) the extracted input features
-    scaled_input = scaler.transform(input_array_reshaped)
-
+# Define a function to make a prediction using the preprocessed input features
+def make_prediction(scaled_input: np.ndarray) -> int:
     # Use the loaded model object to make a prediction
     prediction = model.predict(scaled_input)
+    # Convert the prediction to a Python int
+    return int(prediction[0])
 
-    # The prediction will be a NumPy array, convert it to a Python int
-    result = int(prediction[0])
-
-    return jsonify({'prediction': result}), 200
+# Define the predict endpoint
+@app.route('/predict', methods=['POST'])
+async def predict():
+    try:
+        # Get the request data
+        data = request.get_json(force=True)
+        logging.info("Received data for prediction: %s", data)
+        
+        # Extract the input features
+        input_features = extract_input_features(data)
+        
+        # Preprocess the input features
+        scaled_input = preprocess_input_features(input_features)
+        
+        # Make a prediction
+        result = make_prediction(scaled_input)
+        
+        # Return the prediction result
+        return jsonify({'prediction': result}), 200
+    except Exception as e:
+        # Log the error and return a 500 error response
+        logging.error("Error making prediction: %s", e)
+        return jsonify({"error": "Internal Server Error"}), 500
 
 print("Prediction endpoint updated with preprocessing and prediction logic.")
-
 if __name__ == "__main__":
     print("Starting prediction API with preprocessing and model inference...")
     app.run(debug=True)
